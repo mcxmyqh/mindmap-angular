@@ -340,8 +340,8 @@ export class MindMapService {
       L.push(...ch.filter(n => n.side === 'left'));
     }
 
-    const minGap = 80;
-    const vGap = 16;
+    const minGap = 120;
+    const vGap = 24;
     const maxRW = R.length ? Math.max(...R.map(n => n.width)) : DEFAULT_W;
     const maxLW = L.length ? Math.max(...L.map(n => n.width)) : DEFAULT_W;
     this.layoutH(doc.nodes, R, 1, root.width / 2 + minGap + maxRW / 2, vGap);
@@ -354,13 +354,13 @@ export class MindMapService {
     const ch = doc.nodes.filter(n => n.parentId === 'root');
     ch.forEach(n => n.side = 'right');
     const maxCW = ch.length ? Math.max(...ch.map(n => n.width)) : DEFAULT_W;
-    this.layoutH(doc.nodes, ch, 1, root.width / 2 + 80 + maxCW / 2, 16);
+    this.layoutH(doc.nodes, ch, 1, root.width / 2 + 120 + maxCW / 2, 24);
   }
 
   /** horizontal 布局核心 */
   private layoutH(nodes: MindNode[], roots: MindNode[], dir: 1 | -1, startX: number, vGap: number): void {
     if (!roots.length) return;
-    const minGap = 80;
+    const minGap = 120;
     const total = this.subtreeHeight(roots, nodes, vGap);
     let cy = -total / 2;
     for (const r of roots) {
@@ -548,19 +548,44 @@ export class MindMapService {
       const dir = dx > 0 ? 1 : -1;
       const pBorder = this.nodeBorder(p);
       const cBorder = this.nodeBorder(c);
-      const sx = p.x + dir * (p.width / 2 - pBorder);   // 父节点边缘（减去边框）
-      const sy = p.y;                                    // 父节点中心 y
-      const ex = c.x - dir * (c.width / 2 - cBorder);   // 子节点边缘（减去边框）
-      const ey = c.y;                                    // 子节点中心 y
+
+      // 获取同侧边的兄弟节点
+      const siblings = this.doc().nodes.filter(n => n.parentId === p.id && n.side === c.side);
+      const nodeCount = siblings.length;
+
+      // 父节点边缘位置
+      const sx = p.x + dir * (p.width / 2 - pBorder);
+
+      // 子节点边缘位置（固定在中心）
+      const ex = c.x - dir * (c.width / 2 - cBorder);
+      const ey = c.y;
+
+      // 计算曲线参数
+      const dist = Math.abs(ex - sx);
+
+      // === XMind 风格曲线算法（简化版） ===
+      // 1. 起始点在父节点边缘均匀分布
+      let sy = p.y;
+      if (nodeCount > 1) {
+        const sorted = [...siblings].sort((a, b) => a.y - b.y);
+        const idx = sorted.findIndex(s => s.id === c.id);
+        if (idx >= 0) {
+          const pHeight = this.nodeH(p);
+          const margin = 4;
+          const ratio = idx / (nodeCount - 1);
+          sy = p.y - pHeight / 2 + margin + ratio * (pHeight - margin * 2);
+        }
+      }
 
       if (ls === 'straight') return `M${sx},${sy} L${ex},${ey}`;
       if (ls === 'polyline') {
         const mx = (sx + ex) / 2;
         return `M${sx},${sy} L${mx},${sy} L${mx},${ey} L${ex},${ey}`;
       }
-      const dist = Math.abs(ex - sx);
-      const cp = Math.max(40, dist * 0.5);
-      return `M${sx},${sy} C${sx + dir * cp},${sy} ${ex - dir * cp},${ey} ${ex},${ey}`;
+
+      // XMind 风格平滑贝塞尔曲线：使用平行控制点
+      const cpDist = Math.max(30, dist * 0.35);
+      return `M${sx},${sy} C${sx + dir * cpDist},${sy} ${ex - dir * cpDist},${ey} ${ex},${ey}`;
     } else {
       // 垂直连接：从父节点下/上边缘到子节点上/下边缘
       const dir = dy > 0 ? 1 : -1;
