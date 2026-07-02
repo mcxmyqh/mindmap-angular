@@ -8,7 +8,7 @@
     (pointerup)="service.endPointer()"
     (pointerleave)="service.endPointer()"
     (wheel)="service.onCanvasWheel($event)"
-    (click)="service.hideContextMenu()"
+    (click)="service.onCanvasClick($event); service.hideContextMenu()"
   >
     <div class="grid"></div>
     <div class="map-stage" [style.transform]="service.canvasTransform()">
@@ -23,12 +23,13 @@
       @for (node of service.visibleNodes(); track node.id) {
         <article
           class="mind-node"
+          [attr.data-id]="node.id"
           [ngClass]="service.nodeClasses(node)"
-          [style.transform]="'translate(' + (node.x - node.width / 2) + 'px, ' + (node.y - 18) + 'px)'"
+          [style.transform]="'translate(' + (node.x - node.width / 2) + 'px, ' + (node.y - service.nodeHalfH(node)) + 'px)'"
           [style.--nc]="node.color"
           [style.width]="node.width + 'px'"
           (pointerdown)="service.startNodeDrag($event, node.id)"
-          (dblclick)="service.toggleCollapse(node.id)"
+          (dblclick)="service.handleNodeDblClick($event, node.id)"
           (contextmenu)="service.showContextMenu($event, node.id)"
         >
           @if (node.icon !== 'none' && node.id !== 'root') {
@@ -43,12 +44,11 @@
                 (blur)="service.updateNodeText(node.id, $any($event.target).textContent); service.endEdit()"
                 (keydown.enter)="$event.preventDefault(); $any($event.target).blur()"
                 (pointerdown)="$event.stopPropagation()"
+                #editInput
               ></strong>
             } @else {
               <strong
                 class="node-label"
-                (dblclick)="service.startEdit(node.id); $event.stopPropagation()"
-                (pointerdown)="$event.stopPropagation()"
               >{{ node.text }}</strong>
             }
             @if (node.note && node.id !== 'root') {
@@ -199,8 +199,7 @@
     <span>Enter 同级</span>
     <span>Delete 删除</span>
     <span>双击编辑</span>
-    <span>滚轮平移</span>
-    <span>Ctrl+滚轮缩放</span>
+    <span>滚轮缩放</span>
     <span>右键菜单</span>
   </footer>
 

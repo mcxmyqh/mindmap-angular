@@ -57,8 +57,8 @@ export {
 };
 
 export const LAYOUT_TEMPLATES: LayoutTemplate[] = [
-  { mode: 'balanced', name: '思维导图', description: '中心向左右展开' },
-  { mode: 'right', name: '逻辑图', description: '向右推进' },
+  { mode: 'balanced', name: '左右推进', description: '中心向左右对称展开' },
+  { mode: 'right', name: '向右推进', description: '所有节点向右展开' },
   { mode: 'logic', name: '组织结构', description: '从上到下分层' },
   { mode: 'orgchart', name: '组织架构图', description: '垂直层次' },
   { mode: 'tree', name: '目录树', description: '单根向下展开' },
@@ -176,8 +176,31 @@ export class MindMapService {
     setTimeout(() => this.fitView(el), 50);
   }
 
+  /** 处理画布点击 - 关闭编辑状态 */
+  onCanvasClick(event: MouseEvent): void {
+    // 如果正在编辑，且点击的不是节点，则结束编辑
+    if (this.editingId() && !(event.target as HTMLElement).closest('.mind-node')) {
+      this.endEdit();
+    }
+  }
+
   /* ── editing helpers ── */
-  startEdit(id: string): void { this.editingId.set(id); }
+  startEdit(id: string): void { 
+    this.editingId.set(id); 
+    // 延迟聚焦，等待 DOM 渲染
+    setTimeout(() => {
+      const editElement = document.querySelector(`.mind-node[data-id="${id}"] .node-edit`) as HTMLElement;
+      if (editElement) {
+        editElement.focus();
+        // 选中所有文本
+        const range = document.createRange();
+        range.selectNodeContents(editElement);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    }, 50);
+  }
   endEdit(): void { this.editingId.set(null); }
   selectNode(id: string): void { this.selectedId.set(id); }
   updateTitle(t: string): void { this.mutate(d => ({ ...d, title: t })); }
@@ -200,7 +223,11 @@ export class MindMapService {
       x: par.x, y: par.y, color, icon: 'none', progress: 0,
       collapsed: false, side, width: DEFAULT_W, tags: [], hyperlink: '',
     };
-    this.mutate(d => ({ ...d, nodes: [...d.nodes, c] }));
+    // 展开父节点，确保新子节点可见
+    this.mutate(d => ({
+      ...d,
+      nodes: d.nodes.map(n => n.id === par.id ? { ...n, collapsed: false } : n).concat(c)
+    }));
     this.selectedId.set(c.id);
     this.autoLayout(false);
   }
@@ -265,6 +292,9 @@ export class MindMapService {
     // 传播分支颜色
     this.propagateColors(doc);
 
+    // 先统一同级节点宽度，再计算布局位置（确保位置基于最终宽度）
+    this.normalizeSiblings(doc);
+
     switch (doc.layout) {
       case 'balanced': this.doBalanced(doc); break;
       case 'right': this.doRight(doc); break;
@@ -282,17 +312,22 @@ export class MindMapService {
     const root = doc.nodes.find(n => n.id === 'root')!;
     const R = doc.nodes.filter(n => n.parentId === 'root' && n.side === 'right');
     const L = doc.nodes.filter(n => n.parentId === 'root' && n.side === 'left');
-    // 如果没有分配side，自动分配
-    if (!R.length && !L.length) {
+    
+    // 如果只有一侧有节点或都没有分配side，重新均衡分配
+    if (!R.length || !L.length) {
       const ch = doc.nodes.filter(n => n.parentId === 'root');
       ch.forEach((n, i) => { n.side = i % 2 === 0 ? 'right' : 'left'; });
+      R.length = 0; L.length = 0;
       R.push(...ch.filter(n => n.side === 'right'));
       L.push(...ch.filter(n => n.side === 'left'));
     }
-    const hGap = 280;
+    
+    const minGap = 80;
     const vGap = 16;
-    this.layoutH(doc.nodes, R, 1, root.width / 2 + hGap, vGap);
-    this.layoutH(doc.nodes, L, -1, -(root.width / 2 + hGap), vGap);
+    const maxRW = R.length ? Math.max(...R.map(n => n.width)) : DEFAULT_W;
+    const maxLW = L.length ? Math.max(...L.map(n => n.width)) : DEFAULT_W;
+    this.layoutH(doc.nodes, R, 1, root.width / 2 + minGap + maxRW / 2, vGap);
+    this.layoutH(doc.nodes, L, -1, -(root.width / 2 + minGap + maxLW / 2), vGap);
   }
 
   /** right: 全部向右 */
@@ -300,23 +335,24 @@ export class MindMapService {
     const root = doc.nodes.find(n => n.id === 'root')!;
     const ch = doc.nodes.filter(n => n.parentId === 'root');
     ch.forEach(n => n.side = 'right');
-    this.layoutH(doc.nodes, ch, 1, root.width / 2 + 280, 16);
+    const maxCW = ch.length ? Math.max(...ch.map(n => n.width)) : DEFAULT_W;
+    this.layoutH(doc.nodes, ch, 1, root.width / 2 + 80 + maxCW / 2, 16);
   }
 
   /** horizontal 布局核心 */
   private layoutH(nodes: MindNode[], roots: MindNode[], dir: 1 | -1, startX: number, vGap: number): void {
     if (!roots.length) return;
-    const hGap = 280;
+    const minGap = 80;
     const total = this.subtreeHeight(roots, nodes, vGap);
     let cy = -total / 2;
     for (const r of roots) {
       const h = this.subtreeHeight([r], nodes, vGap);
-      this.placeH(nodes, r, dir, startX, cy + h / 2, vGap, hGap);
+      this.placeH(nodes, r, dir, startX, cy + h / 2, vGap, minGap);
       cy += h + vGap;
     }
   }
 
-  private placeH(nodes: MindNode[], node: MindNode, dir: 1 | -1, x: number, cy: number, vGap: number, hGap: number): void {
+  private placeH(nodes: MindNode[], node: MindNode, dir: 1 | -1, x: number, cy: number, vGap: number, minGap: number): void {
     node.x = x;
     node.y = cy;
     node.side = dir === 1 ? 'right' : 'left';
@@ -324,10 +360,12 @@ export class MindMapService {
     if (!ch.length) return;
     const total = this.subtreeHeight(ch, nodes, vGap);
     let cursor = cy - total / 2;
-    const childX = x + dir * hGap;
+    // 动态计算子节点 x：根据父节点和子节点的实际宽度
+    const maxChildW = Math.max(...ch.map(c => c.width));
+    const childX = x + dir * (node.width / 2 + minGap + maxChildW / 2);
     for (const c of ch) {
       const h = this.subtreeHeight([c], nodes, vGap);
-      this.placeH(nodes, c, dir, childX, cursor + h / 2, vGap, hGap);
+      this.placeH(nodes, c, dir, childX, cursor + h / 2, vGap, minGap);
       cursor += h + vGap;
     }
   }
@@ -339,7 +377,8 @@ export class MindMapService {
     roots.forEach((n, i) => {
       if (i > 0) total += gap;
       const ch = all.filter(c => c.parentId === n.id);
-      total += ch.length ? this.subtreeHeight(ch, all, gap) : NODE_H;
+      // 使用实际节点高度
+      total += ch.length ? this.subtreeHeight(ch, all, gap) : this.nodeH(n);
     });
     return total;
   }
@@ -434,6 +473,28 @@ export class MindMapService {
     });
   }
 
+  /** 后处理：同一父节点下同侧子节点统一宽度，保证视觉对齐 */
+  private normalizeSiblings(doc: MindMapDoc): void {
+    // 按 (parentId, side) 分组，避免 balanced 布局左右侧混合
+    const groups = new Map<string, MindNode[]>();
+    for (const n of doc.nodes) {
+      const key = `${n.parentId || 'null'}_${n.side || 'none'}`;
+      const arr = groups.get(key) || [];
+      arr.push(n);
+      groups.set(key, arr);
+    }
+
+    // 对每组取最大宽度并统一
+    for (const [, siblings] of groups) {
+      if (siblings.length <= 1) continue;
+      const maxW = Math.max(...siblings.map(n => n.width));
+      // 对齐到相同宽度
+      for (const n of siblings) {
+        n.width = maxW;
+      }
+    }
+  }
+
   /** 分支颜色传播 */
   private propagateColors(doc: MindMapDoc): void {
     const ch = doc.nodes.filter(n => n.parentId === 'root');
@@ -449,43 +510,89 @@ export class MindMapService {
     }
   }
 
-  /* ── connector path ── */
+  /* ── connector path — 紧贴节点边缘，避免穿过节点中间 ── */
+  private nodeH(n: MindNode): number {
+    return n.id === 'root' ? 44 : NODE_H;
+  }
+
+  // 节点边框宽度（用于计算连接线边缘位置）
+  private nodeBorder(n: MindNode): number {
+    return n.id === 'root' ? 0 : 1.5;  // 根节点无边框，普通节点 1.5px
+  }
+
   private buildPath(p: MindNode, c: MindNode, ls: string): string {
     const dx = c.x - p.x;
     const dy = c.y - p.y;
     const horiz = Math.abs(dx) >= Math.abs(dy);
-    const half = NODE_H / 2;
 
     if (horiz) {
-      const sx = p.x + (dx > 0 ? p.width / 2 : -p.width / 2);
-      const ex = c.x + (dx > 0 ? -c.width / 2 : c.width / 2);
-      if (ls === 'straight') return `M${sx},${p.y} L${ex},${c.y}`;
-      if (ls === 'polyline') { const mx = (sx + ex) / 2; return `M${sx},${p.y} L${mx},${p.y} L${mx},${c.y} L${ex},${c.y}`; }
-      // curve
-      const cp = Math.max(40, Math.abs(ex - sx) * 0.45);
-      return `M${sx},${p.y} C${sx + (dx > 0 ? cp : -cp)},${p.y} ${ex - (dx > 0 ? cp : -cp)},${c.y} ${ex},${c.y}`;
+      // 水平连接：从父节点右/左边缘到子节点左/右边缘
+      const dir = dx > 0 ? 1 : -1;
+      const pBorder = this.nodeBorder(p);
+      const cBorder = this.nodeBorder(c);
+      const sx = p.x + dir * (p.width / 2 - pBorder);   // 父节点边缘（减去边框）
+      const sy = p.y;                                    // 父节点中心 y
+      const ex = c.x - dir * (c.width / 2 - cBorder);   // 子节点边缘（减去边框）
+      const ey = c.y;                                    // 子节点中心 y
+      
+      if (ls === 'straight') return `M${sx},${sy} L${ex},${ey}`;
+      if (ls === 'polyline') { 
+        const mx = (sx + ex) / 2; 
+        return `M${sx},${sy} L${mx},${sy} L${mx},${ey} L${ex},${ey}`; 
+      }
+      const dist = Math.abs(ex - sx);
+      const cp = Math.max(40, dist * 0.5);
+      return `M${sx},${sy} C${sx + dir * cp},${sy} ${ex - dir * cp},${ey} ${ex},${ey}`;
     } else {
-      const sy = p.y + (dy > 0 ? half : -half);
-      const ey = c.y + (dy > 0 ? -half : half);
-      if (ls === 'straight') return `M${p.x},${sy} L${c.x},${ey}`;
-      if (ls === 'polyline') { const my = (sy + ey) / 2; return `M${p.x},${sy} L${p.x},${my} L${c.x},${my} L${c.x},${ey}`; }
-      const cp = Math.max(30, Math.abs(ey - sy) * 0.45);
-      return `M${p.x},${sy} C${p.x},${sy + (dy > 0 ? cp : -cp)} ${c.x},${ey - (dy > 0 ? cp : -cp)} ${c.x},${ey}`;
+      // 垂直连接：从父节点下/上边缘到子节点上/下边缘
+      const dir = dy > 0 ? 1 : -1;
+      const pHalf = this.nodeH(p) / 2;
+      const cHalf = this.nodeH(c) / 2;
+      const sx = p.x;
+      const sy = p.y + dir * pHalf;
+      const ex = c.x;
+      const ey = c.y - dir * cHalf;
+      
+      if (ls === 'straight') return `M${sx},${sy} L${ex},${ey}`;
+      if (ls === 'polyline') { 
+        const my = (sy + ey) / 2; 
+        return `M${sx},${sy} L${sx},${my} L${ex},${my} L${ex},${ey}`; 
+      }
+      const dist = Math.abs(ey - sy);
+      const cp = Math.max(30, dist * 0.5);
+      return `M${sx},${sy} C${sx},${sy + dir * cp} ${ex},${ey - dir * cp} ${ex},${ey}`;
     }
   }
 
   /* ── drag / pan / zoom ── */
+  private dragHistoryPushed = false;
+
   startNodeDrag(event: PointerEvent, id: string): void {
+    // 如果点击的是收缩按钮或缩放手柄，不启动拖动
+    const target = event.target as HTMLElement;
+    if (target.closest('.collapse-btn') || target.closest('.resize-handle')) return;
+    // 如果正在编辑节点，不允许拖动
+    if (this.editingId()) return;
+    
     event.stopPropagation();
     const node = this.doc().nodes.find(n => n.id === id);
     if (!node) return;
+    
+    // 立即启动拖动，双击时通过取消 drag 来阻止
     this.selectNode(id);
-    this.pushHistory();
-    this.future = [];
+    this.dragHistoryPushed = false;
     const descIds = this.collectDesc(id); descIds.delete(id);
     const descendants = this.doc().nodes.filter(n => descIds.has(n.id)).map(n => ({ id: n.id, origX: n.x, origY: n.y }));
     this.drag = { mode: 'node', id, startX: event.clientX, startY: event.clientY, originalX: node.x, originalY: node.y, descendants };
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  /** 处理双击事件 - 取消拖动，开始编辑 */
+  handleNodeDblClick(event: MouseEvent, id: string): void {
+    event.stopPropagation();
+    // 取消正在进行的拖动
+    this.drag = null;
+    this.startEdit(id);
   }
 
   startNodeResize(event: PointerEvent, id: string): void {
@@ -506,6 +613,7 @@ export class MindMapService {
     if (!this.drag) return;
     const z = this.zoom();
     if (this.drag.mode === 'resize') {
+      if (!this.dragHistoryPushed) { this.pushHistory(); this.future = []; this.dragHistoryPushed = true; }
       this.updateNodeW(this.drag.id, Math.max(80, this.drag.originalWidth + (event.clientX - this.drag.startX) / z));
       return;
     }
@@ -514,11 +622,15 @@ export class MindMapService {
       this.pan.set({ x: this.drag.originalX + dx, y: this.drag.originalY + dy });
       return;
     }
+    // node drag — only push history on actual movement
+    if (!this.dragHistoryPushed && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) {
+      this.pushHistory(); this.future = []; this.dragHistoryPushed = true;
+    }
     this.dragNode(this.drag.id, this.drag.originalX + dx / z, this.drag.originalY + dy / z);
   }
 
   endPointer(): void {
-    if (this.drag?.mode === 'node' || this.drag?.mode === 'resize') this.saveDoc();
+    if (this.dragHistoryPushed && (this.drag?.mode === 'node' || this.drag?.mode === 'resize')) this.saveDoc();
     this.drag = null;
   }
 
@@ -527,15 +639,7 @@ export class MindMapService {
   }
   onCanvasWheel(event: WheelEvent): void {
     event.preventDefault();
-    // Ctrl / Meta + 滚轮 = 缩放
-    if (event.ctrlKey || event.metaKey) {
-      this.zoomCanvas(event.deltaY > 0 ? -0.06 : 0.06);
-      return;
-    }
-    // 普通滚轮 = 平移视图
-    const speed = 1.2;
-    const p = this.pan();
-    this.pan.set({ x: p.x - event.deltaX * speed, y: p.y - event.deltaY * speed });
+    this.zoomCanvas(event.deltaY > 0 ? -0.06 : 0.06);
   }
 
   fitView(canvas?: HTMLElement): void {
@@ -655,6 +759,10 @@ export class MindMapService {
     return ({ star: '★', flag: '⚑', check: '✓', idea: '!', warn: '?' } as Record<string, string>)[icon] ?? '';
   }
 
+  nodeHalfH(node: MindNode): number {
+    return (node.id === 'root' ? 44 : NODE_H) / 2;
+  }
+
   /* ── private ── */
   private mutate(updater: (doc: MindMapDoc) => MindMapDoc): void {
     this.pushHistory();
@@ -710,7 +818,7 @@ export class MindMapService {
   private mapBounds(nodes: MindNode[]): { minX: number; minY: number; width: number; height: number } {
     const hw = Math.max(...nodes.map(n => n.width / 2)) + 30;
     const minX = Math.min(...nodes.map(n => n.x - hw)), maxX = Math.max(...nodes.map(n => n.x + hw));
-    const minY = Math.min(...nodes.map(n => n.y - 50)), maxY = Math.max(...nodes.map(n => n.y + 50));
+    const minY = Math.min(...nodes.map(n => n.y - this.nodeH(n) / 2 - 20)), maxY = Math.max(...nodes.map(n => n.y + this.nodeH(n) / 2 + 20));
     return { minX, minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
   }
 
@@ -760,9 +868,10 @@ export class MindMapService {
     const minX = Math.min(...xs) - hw, minY = Math.min(...ys) - pad;
     const w = Math.max(...xs) + hw - minX, h = Math.max(...ys) + pad - minY;
     const conns = this.connectors().map(c => `<path d="${c.path}" fill="none" stroke="${c.color}" stroke-width="2.5" opacity="0.5"/>`).join('');
-    const items = ns.map(n =>
-      `<g transform="translate(${n.x - n.width / 2},${n.y - NODE_H / 2})"><rect width="${n.width}" height="${NODE_H}" rx="8" fill="${n.id === 'root' ? n.color : 'white'}" stroke="${n.color}" stroke-width="2"/><text x="${n.width / 2}" y="${NODE_H / 2 + 5}" text-anchor="middle" font-size="13" font-family="system-ui,sans-serif" fill="${n.id === 'root' ? 'white' : '#333'}">${this.escapeXml(n.text)}</text></g>`
-    ).join('');
+    const items = ns.map(n => {
+      const nh = this.nodeH(n);
+      return `<g transform="translate(${n.x - n.width / 2},${n.y - nh / 2})"><rect width="${n.width}" height="${nh}" rx="${n.id === 'root' ? 20 : 8}" fill="${n.id === 'root' ? n.color : 'white'}" stroke="${n.color}" stroke-width="2"/><text x="${n.width / 2}" y="${nh / 2 + 5}" text-anchor="middle" font-size="13" font-family="system-ui,sans-serif" fill="${n.id === 'root' ? 'white' : '#333'}">${this.escapeXml(n.text)}</text></g>`;
+    }).join('');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${w} ${h}">${conns}${items}</svg>`;
   }
 
