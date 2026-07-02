@@ -2,9 +2,10 @@ import { Injectable, computed, signal } from '@angular/core';
 
 /* ── types ── */
 type BranchSide = 'left' | 'right';
-type LayoutMode = 'balanced' | 'right' | 'logic' | 'orgchart' | 'tree' | 'timeline' | 'fishbone';
+type LayoutMode = 'balanced' | 'right' | 'logic' | 'orgchart' | 'tree' | 'timeline' | 'fishbone' | 'radial' | 'cascade' | 'mindmap';
 type ThemeName = 'ocean' | 'forest' | 'sunset' | 'mono' | 'dark';
 type LineStyleType = 'curve' | 'straight' | 'polyline';
+type NodeShape = 'rounded' | 'pill' | 'cloud' | 'diamond' | 'hexagon' | 'badge' | 'tag';
 
 export interface MindNode {
   id: string;
@@ -21,6 +22,7 @@ export interface MindNode {
   width: number;
   tags: string[];
   hyperlink: string;
+  shape: NodeShape;
 }
 
 export interface MindMapDoc {
@@ -48,12 +50,13 @@ type DragState = DragNodeState | DragPanState | DragResizeState | null;
 const STORAGE_KEY = 'mindmap-angular-v3';
 const BRANCH_COLORS = ['#4A90D9', '#E74C3C', '#2ECC71', '#F39C12', '#9B59B6', '#1ABC9C', '#E67E22', '#3498DB'];
 const ICONS = ['none', 'star', 'flag', 'check', 'idea', 'warn'];
+const SHAPES: NodeShape[] = ['rounded', 'pill', 'cloud', 'hexagon', 'badge', 'tag'];
 const NODE_H = 36;
 const DEFAULT_W = 160;
 
 export {
-  type BranchSide, type LayoutMode, type ThemeName, type LineStyleType,
-  BRANCH_COLORS, ICONS,
+  type BranchSide, type LayoutMode, type ThemeName, type LineStyleType, type NodeShape,
+  BRANCH_COLORS, ICONS, SHAPES,
 };
 
 export const LAYOUT_TEMPLATES: LayoutTemplate[] = [
@@ -81,14 +84,15 @@ export const LINE_STYLES: { type: LineStyleType; name: string }[] = [
 ];
 
 /* ── helpers ── */
-function mkNode(id: string, pid: string | null, text: string, color: string, side: BranchSide, note = '', icon = 'none'): MindNode {
-  return { id, parentId: pid, text, note, x: 0, y: 0, color, icon, progress: 0, collapsed: false, side, width: DEFAULT_W, tags: [], hyperlink: '' };
+function mkNode(id: string, pid: string | null, text: string, color: string, side: BranchSide, note = '', icon = 'none', shape: NodeShape = 'rounded'): MindNode {
+  return { id, parentId: pid, text, note, x: 0, y: 0, color, icon, progress: 0, collapsed: false, side, width: DEFAULT_W, tags: [], hyperlink: '', shape };
 }
 
 /* ════════════════════════════════════════════════════════════ */
 @Injectable({ providedIn: 'root' })
 export class MindMapService {
   readonly icons = ICONS;
+  readonly shapes = SHAPES;
   readonly layoutTemplates = LAYOUT_TEMPLATES;
   readonly themeTemplates = THEME_TEMPLATES;
   readonly lineStyles = LINE_STYLES;
@@ -96,6 +100,7 @@ export class MindMapService {
 
   readonly doc = signal<MindMapDoc>(this.loadDoc());
   readonly selectedId = signal('root');
+  readonly selectedIds = signal<string[]>([]);  // 多选节点ID
   readonly searchText = signal('');
   readonly replaceText = signal('');
   readonly zoom = signal(0.9);
@@ -185,8 +190,8 @@ export class MindMapService {
   }
 
   /* ── editing helpers ── */
-  startEdit(id: string): void { 
-    this.editingId.set(id); 
+  startEdit(id: string): void {
+    this.editingId.set(id);
     // 延迟聚焦，等待 DOM 渲染
     setTimeout(() => {
       const editElement = document.querySelector(`.mind-node[data-id="${id}"] .node-edit`) as HTMLElement;
@@ -202,7 +207,19 @@ export class MindMapService {
     }, 50);
   }
   endEdit(): void { this.editingId.set(null); }
-  selectNode(id: string): void { this.selectedId.set(id); }
+  selectNode(id: string, multiSelect = false): void {
+    if (multiSelect) {
+      const current = this.selectedIds();
+      if (current.includes(id)) {
+        this.selectedIds.set(current.filter(i => i !== id));
+      } else {
+        this.selectedIds.set([...current, id]);
+      }
+    } else {
+      this.selectedIds.set([]);
+    }
+    this.selectedId.set(id);
+  }
   updateTitle(t: string): void { this.mutate(d => ({ ...d, title: t })); }
 
   updateSelected(patch: Partial<MindNode>): void {
@@ -222,6 +239,7 @@ export class MindMapService {
       id: this.uid(), parentId: par.id, text: '新主题', note: '',
       x: par.x, y: par.y, color, icon: 'none', progress: 0,
       collapsed: false, side, width: DEFAULT_W, tags: [], hyperlink: '',
+      shape: 'rounded',
     };
     // 展开父节点，确保新子节点可见
     this.mutate(d => ({
@@ -235,7 +253,7 @@ export class MindMapService {
   addSibling(): void {
     const cur = this.selectedNode();
     if (!cur.parentId) { this.addChild(); return; }
-    const s: MindNode = { ...cur, id: this.uid(), text: '同级主题', note: '', y: cur.y + 60, collapsed: false };
+    const s: MindNode = { ...cur, id: this.uid(), text: '同级主题', note: '', y: cur.y + 60, collapsed: false, shape: cur.shape || 'rounded' };
     this.mutate(d => ({ ...d, nodes: [...d.nodes, s] }));
     this.selectedId.set(s.id);
     this.autoLayout(false);
@@ -312,7 +330,7 @@ export class MindMapService {
     const root = doc.nodes.find(n => n.id === 'root')!;
     const R = doc.nodes.filter(n => n.parentId === 'root' && n.side === 'right');
     const L = doc.nodes.filter(n => n.parentId === 'root' && n.side === 'left');
-    
+
     // 如果只有一侧有节点或都没有分配side，重新均衡分配
     if (!R.length || !L.length) {
       const ch = doc.nodes.filter(n => n.parentId === 'root');
@@ -321,7 +339,7 @@ export class MindMapService {
       R.push(...ch.filter(n => n.side === 'right'));
       L.push(...ch.filter(n => n.side === 'left'));
     }
-    
+
     const minGap = 80;
     const vGap = 16;
     const maxRW = R.length ? Math.max(...R.map(n => n.width)) : DEFAULT_W;
@@ -534,11 +552,11 @@ export class MindMapService {
       const sy = p.y;                                    // 父节点中心 y
       const ex = c.x - dir * (c.width / 2 - cBorder);   // 子节点边缘（减去边框）
       const ey = c.y;                                    // 子节点中心 y
-      
+
       if (ls === 'straight') return `M${sx},${sy} L${ex},${ey}`;
-      if (ls === 'polyline') { 
-        const mx = (sx + ex) / 2; 
-        return `M${sx},${sy} L${mx},${sy} L${mx},${ey} L${ex},${ey}`; 
+      if (ls === 'polyline') {
+        const mx = (sx + ex) / 2;
+        return `M${sx},${sy} L${mx},${sy} L${mx},${ey} L${ex},${ey}`;
       }
       const dist = Math.abs(ex - sx);
       const cp = Math.max(40, dist * 0.5);
@@ -552,11 +570,11 @@ export class MindMapService {
       const sy = p.y + dir * pHalf;
       const ex = c.x;
       const ey = c.y - dir * cHalf;
-      
+
       if (ls === 'straight') return `M${sx},${sy} L${ex},${ey}`;
-      if (ls === 'polyline') { 
-        const my = (sy + ey) / 2; 
-        return `M${sx},${sy} L${sx},${my} L${ex},${my} L${ex},${ey}`; 
+      if (ls === 'polyline') {
+        const my = (sy + ey) / 2;
+        return `M${sx},${sy} L${sx},${my} L${ex},${my} L${ex},${ey}`;
       }
       const dist = Math.abs(ey - sy);
       const cp = Math.max(30, dist * 0.5);
@@ -573,11 +591,11 @@ export class MindMapService {
     if (target.closest('.collapse-btn') || target.closest('.resize-handle')) return;
     // 如果正在编辑节点，不允许拖动
     if (this.editingId()) return;
-    
+
     event.stopPropagation();
     const node = this.doc().nodes.find(n => n.id === id);
     if (!node) return;
-    
+
     // 立即启动拖动，双击时通过取消 drag 来阻止
     this.selectNode(id);
     this.dragHistoryPushed = false;
@@ -743,12 +761,41 @@ export class MindMapService {
     this.mutate(d => ({ ...d, nodes: d.nodes.map(n => n.id === id ? { ...n, tags: n.tags.filter(t => t !== tag) } : n) }));
   }
 
+  /**
+   * 更新选中节点的形状
+   */
+  updateShape(shape: NodeShape): void {
+    const targetIds = new Set<string>();
+
+    // 添加选中的节点
+    targetIds.add(this.selectedId());
+    for (const id of this.selectedIds()) {
+      targetIds.add(id);
+    }
+
+    this.mutate(d => ({
+      ...d,
+      nodes: d.nodes.map(n => targetIds.has(n.id) ? { ...n, shape } : n)
+    }));
+  }
+
+  /**
+   * 将形状应用到所有节点
+   */
+  applyShapeToAll(shape: NodeShape): void {
+    this.mutate(d => ({
+      ...d,
+      nodes: d.nodes.map(n => ({ ...n, shape }))
+    }));
+  }
+
   /* ── helpers ── */
   childrenOf(pid: string): MindNode[] { return this.doc().nodes.filter(n => n.parentId === pid); }
   hasChildren(id: string): boolean { return this.doc().nodes.some(n => n.parentId === id); }
 
   nodeClasses(node: MindNode): Record<string, boolean> {
-    return { selected: node.id === this.selectedId(), matched: this.matchedIds().has(node.id), root: node.id === 'root', collapsed: node.collapsed };
+    const isSelected = node.id === this.selectedId() || this.selectedIds().includes(node.id);
+    return { selected: isSelected, matched: this.matchedIds().has(node.id), root: node.id === 'root', collapsed: node.collapsed, noIcon: node.icon === 'none' };
   }
 
   outlineLevelStyle(level: number): Record<string, string> {

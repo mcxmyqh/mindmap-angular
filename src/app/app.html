@@ -22,13 +22,14 @@
       <!-- 节点层 -->
       @for (node of service.visibleNodes(); track node.id) {
         <article
-          class="mind-node"
+          class="mind-node shape-{{ node.shape }}"
           [attr.data-id]="node.id"
           [ngClass]="service.nodeClasses(node)"
           [style.transform]="'translate(' + (node.x - node.width / 2) + 'px, ' + (node.y - service.nodeHalfH(node)) + 'px)'"
           [style.--nc]="node.color"
           [style.width]="node.width + 'px'"
           (pointerdown)="service.startNodeDrag($event, node.id)"
+          (click)="service.selectNode(node.id, $event.ctrlKey || $event.metaKey)"
           (dblclick)="service.handleNodeDblClick($event, node.id)"
           (contextmenu)="service.showContextMenu($event, node.id)"
         >
@@ -168,6 +169,24 @@
         }
       </div>
       <span class="tb-sep"></span>
+      <!-- 全局形状 -->
+      <div class="dd-wrap">
+        <button class="tb-btn" title="全局形状" (click)="toggleDropdown('shape'); $event.stopPropagation()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        </button>
+        @if (activeDropdown === 'shape') {
+          <div class="dd-menu">
+            <span class="dd-label">应用形状到所有节点</span>
+            @for (shape of service.shapes; track shape) {
+              <button class="dd-item" (click)="service.applyShapeToAll(shape); activeDropdown = null">
+                <span class="shape-preview shape-{{ shape }}" style="width: 20px; height: 14px;"></span>
+                <span class="dd-name">{{ shapeLabel(shape) }}</span>
+              </button>
+            }
+          </div>
+        }
+      </div>
+      <span class="tb-sep"></span>
       <!-- 导出 -->
       <div class="dd-wrap">
         <button class="tb-btn" title="导出" (click)="toggleDropdown('export'); $event.stopPropagation()">
@@ -261,6 +280,18 @@
             <button class="icon-btn" [class.active]="node.icon === icon"
               (click)="service.updateSelected({ icon })">
               {{ icon === 'none' ? '无' : service.iconLabel(icon) }}
+            </button>
+          }
+        </div>
+      </div>
+      <div class="props-field">
+        <span>形状</span>
+        <div class="shape-row">
+          @for (shape of service.shapes; track shape) {
+            <button class="shape-btn" [class.active]="node.shape === shape"
+              (click)="service.updateShape(shape)">
+              <span class="shape-preview shape-{{ shape }}"></span>
+              <span class="shape-name">{{ shapeLabel(shape) }}</span>
             </button>
           }
         </div>

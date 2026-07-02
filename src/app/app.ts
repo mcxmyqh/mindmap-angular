@@ -14,7 +14,7 @@ export class App {
 
   @ViewChild('canvasRef') private canvasRef?: ElementRef<HTMLElement>;
 
-  activeDropdown: 'layout' | 'theme' | 'lineStyle' | 'export' | null = null;
+  activeDropdown: 'layout' | 'theme' | 'lineStyle' | 'shape' | 'export' | null = null;
   showProps = false;
 
   constructor() {
@@ -53,7 +53,19 @@ export class App {
 
   fitView(): void { this.service.fitView(this.canvasRef?.nativeElement); }
 
-  toggleDropdown(name: 'layout' | 'theme' | 'lineStyle' | 'export'): void {
+  toggleDropdown(name: 'layout' | 'theme' | 'lineStyle' | 'shape' | 'export'): void {
     this.activeDropdown = this.activeDropdown === name ? null : name;
+  }
+
+  shapeLabel(shape: string): string {
+    const labels: Record<string, string> = {
+      rounded: '圆角',
+      pill: '胶囊',
+      cloud: '云朵',
+      hexagon: '六边形',
+      badge: '徽章',
+      tag: '标签',
+    };
+    return labels[shape] || shape;
   }
 }

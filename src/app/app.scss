@@ -115,6 +115,54 @@
     border-radius: 0 3px 3px 0;
     background: var(--nc);
   }
+
+  // 节点形状样式
+  &.shape-pill {
+    border-radius: 18px;
+    &::before { border-radius: 0 3px 3px 0; }
+  }
+
+  // 圆角形状且没有图标时，隐藏左侧竖线，只显示边框颜色
+  &.shape-rounded.noIcon {
+    border-color: var(--nc);
+    &::before { display: none; }
+  }
+
+  &.shape-cloud {
+    border-radius: 40% 40% 40% 40% / 50% 50% 50% 50%;
+    border-width: 2px;
+    border-color: var(--nc);
+    &::before { display: none; }
+  }
+
+  &.shape-diamond {
+    border-radius: 0;
+    transform: rotate(45deg);
+    &::before { display: none; }
+    .node-body { transform: rotate(-45deg); }
+    .node-icon { transform: rotate(-45deg); }
+    .collapse-btn { transform: translateY(-50%) rotate(-45deg); }
+    .resize-handle { display: none; }
+  }
+
+  &.shape-hexagon {
+    clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+    border-radius: 0;
+    &::before { display: none; }
+  }
+
+  &.shape-badge {
+    border-radius: 4px 4px 4px 12px;
+    border-width: 2px;
+    border-color: var(--nc);
+    &::before { display: none; }
+  }
+
+  &.shape-tag {
+    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, 8px 50%);
+    border-radius: 4px;
+    &::before { display: none; }
+  }
 }
 
 .mind-node.root {
@@ -130,6 +178,13 @@
 
   .node-label { color: white; font-size: 15px; font-weight: 700; }
   .node-note { color: rgba(255,255,255,0.7); }
+
+  &.shape-pill { border-radius: 22px; }
+  &.shape-cloud {
+    border-radius: 40% 40% 40% 40% / 50% 50% 50% 50%;
+    border-width: 2px;
+    border-color: rgba(255,255,255,0.3);
+  }
 }
 
 .mind-node.selected {
@@ -605,6 +660,69 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.shape-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.shape-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 48px;
+  padding: 6px 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  box-shadow: none;
+
+  &:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  &.active {
+    background: var(--accent);
+    border-color: transparent;
+    .shape-preview { border-color: rgba(255,255,255,0.5); }
+  }
+}
+
+.shape-preview {
+  width: 24px;
+  height: 18px;
+  border: 2px solid var(--accent);
+  background: var(--accent);
+  opacity: 0.6;
+
+  &.shape-rounded { border-radius: 4px; }
+  &.shape-pill { border-radius: 9px; }
+  &.shape-cloud {
+    border-radius: 60% 60% 60% 60% / 60% 60% 60% 60%;
+    width: 28px;
+  }
+  &.shape-diamond {
+    border-radius: 0;
+    transform: rotate(45deg);
+    width: 16px;
+    height: 16px;
+  }
+  &.shape-hexagon {
+    clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+    border-radius: 0;
+    width: 20px;
+  }
+  &.shape-badge { border-radius: 2px 2px 2px 8px; }
+  &.shape-tag {
+    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 0 100%, 6px 50%);
+    border-radius: 2px;
+  }
+}
+
+.shape-name {
+  font-size: 10px;
+  color: var(--muted);
 }
 
 .color-dot {
