@@ -1,275 +1,282 @@
-<main class="mindmap-shell" [attr.data-theme]="doc().theme">
-  <header class="topbar">
-    <section class="brand">
-      <div class="mark">M</div>
-      <div>
-        <input
-          class="title-input"
-          [ngModel]="doc().title"
-          (ngModelChange)="updateTitle($event)"
-          aria-label="导图标题"
-        />
-        <p>Angular 20 Mind Studio</p>
-      </div>
-    </section>
-
-    <section class="toolbar" aria-label="主要工具">
-      <button title="撤销" (click)="undo()">↶</button>
-      <button title="重做" (click)="redo()">↷</button>
-      <span class="divider"></span>
-      <button title="添加子主题" (click)="addChild()">＋</button>
-      <button title="添加同级主题" (click)="addSibling()">≡＋</button>
-      <button title="删除主题" (click)="deleteSelected()">⌫</button>
-      <button title="折叠/展开" (click)="toggleCollapse()">▾</button>
-      <span class="divider"></span>
-      <button title="缩小" (click)="zoomCanvas(-0.08)">−</button>
-      <span class="zoom">{{ (zoom() * 100).toFixed(0) }}%</span>
-      <button title="放大" (click)="zoomCanvas(0.08)">＋</button>
-      <button title="重置视图" (click)="fitView()">◎</button>
-      <button title="自动布局" [class.busy]="layoutBusy()" (click)="autoLayout()">⌘</button>
-    </section>
-
-    <section class="actions">
-      <label class="import-btn" title="导入 JSON">
-        ⇪
-        <input type="file" accept="application/json,.json" (change)="importJson($event)" />
-      </label>
-      <button title="导出 JSON" (click)="exportJson()">JSON</button>
-      <button title="导出 SVG" (click)="exportSvg()">SVG</button>
-    </section>
-  </header>
-
-  <aside class="left-panel">
-    <div class="panel-heading">
-      <span>大纲</span>
-      <button title="恢复示例" (click)="resetDemo()">↺</button>
-    </div>
-
-    <label class="search">
-      <span>⌕</span>
-      <input
-        type="search"
-        placeholder="搜索主题或备注"
-        [ngModel]="searchText()"
-        (ngModelChange)="searchText.set($event)"
-      />
-    </label>
-
-    <div class="outline-list">
-      <button
-        class="outline-item root"
-        [class.active]="selectedId() === 'root'"
-        (click)="selectNode('root')"
-      >
-        <span>{{ doc().nodes[0].text }}</span>
-        <small>{{ childrenOf('root').length }}</small>
-      </button>
-
-      @for (item of outline(); track item.id) {
-        <button
-          class="outline-item"
-          [class.active]="selectedId() === item.id"
-          [class.match]="matchedIds().has(item.id)"
-          [ngStyle]="outlineLevelStyle(item.level)"
-          (click)="selectNode(item.id)"
-        >
-          <span class="tree-stem" aria-hidden="true"></span>
-          <i [style.background]="item.color"></i>
-          <span>{{ item.text }}</span>
-          @if (hasChildren(item.id)) {
-            <small>{{ childrenOf(item.id).length }}</small>
-          }
-        </button>
-      }
-    </div>
-  </aside>
-
+<main class="app" [attr.data-theme]="service.doc().theme">
+  <!-- ─── 全屏画布 ─── -->
   <section
     #canvasRef
     class="canvas"
-    (pointerdown)="startPan($event)"
-    (pointermove)="movePointer($event)"
-    (pointerup)="endPointer()"
-    (pointerleave)="endPointer()"
+    (pointerdown)="service.startPan($event)"
+    (pointermove)="service.movePointer($event)"
+    (pointerup)="service.endPointer()"
+    (pointerleave)="service.endPointer()"
+    (wheel)="service.onCanvasWheel($event)"
+    (click)="service.hideContextMenu()"
   >
     <div class="grid"></div>
-    <div class="map-stage" [style.transform]="canvasTransform()">
-      <svg class="connectors" viewBox="-1800 -1200 3600 2400" aria-hidden="true">
-        @for (connector of connectors(); track connector.id) {
-          <path [attr.d]="connector.path" [attr.stroke]="connector.color"></path>
+    <div class="map-stage" [style.transform]="service.canvasTransform()">
+      <!-- 连接线层 -->
+      <svg class="connectors" [ngStyle]="service.connectorSvgStyle()" [attr.viewBox]="service.connectorViewBox()" aria-hidden="true">
+        @for (c of service.connectors(); track c.id) {
+          <path [attr.d]="c.path" [attr.stroke]="c.color"></path>
         }
       </svg>
 
-      @for (node of visibleNodes(); track node.id) {
+      <!-- 节点层 -->
+      @for (node of service.visibleNodes(); track node.id) {
         <article
           class="mind-node"
-          [ngClass]="nodeClasses(node)"
-          [style.transform]="'translate(' + (node.x - 120) + 'px, ' + (node.y - 38) + 'px)'"
-          [style.--node-color]="node.color"
-          (pointerdown)="startNodeDrag($event, node.id)"
-          (dblclick)="toggleCollapse(node.id)"
+          [ngClass]="service.nodeClasses(node)"
+          [style.transform]="'translate(' + (node.x - node.width / 2) + 'px, ' + (node.y - 18) + 'px)'"
+          [style.--nc]="node.color"
+          [style.width]="node.width + 'px'"
+          (pointerdown)="service.startNodeDrag($event, node.id)"
+          (dblclick)="service.toggleCollapse(node.id)"
+          (contextmenu)="service.showContextMenu($event, node.id)"
         >
-          <div class="node-accent"></div>
-          @if (node.icon !== 'none') {
-            <span class="node-icon">{{ iconLabel(node.icon) }}</span>
+          @if (node.icon !== 'none' && node.id !== 'root') {
+            <span class="node-icon">{{ service.iconLabel(node.icon) }}</span>
           }
-          <div class="node-text">
-            <strong>{{ node.text }}</strong>
-            @if (node.note) {
-              <small>{{ node.note }}</small>
+          <div class="node-body">
+            @if (service.editingId() === node.id) {
+              <strong
+                class="node-edit"
+                contenteditable="true"
+                [textContent]="node.text"
+                (blur)="service.updateNodeText(node.id, $any($event.target).textContent); service.endEdit()"
+                (keydown.enter)="$event.preventDefault(); $any($event.target).blur()"
+                (pointerdown)="$event.stopPropagation()"
+              ></strong>
+            } @else {
+              <strong
+                class="node-label"
+                (dblclick)="service.startEdit(node.id); $event.stopPropagation()"
+                (pointerdown)="$event.stopPropagation()"
+              >{{ node.text }}</strong>
+            }
+            @if (node.note && node.id !== 'root') {
+              <small class="node-note">{{ node.note }}</small>
             }
           </div>
-          @if (hasChildren(node.id)) {
-            <button class="collapse" title="折叠/展开" (click)="toggleCollapse(node.id); $event.stopPropagation()">
+          @if (service.hasChildren(node.id)) {
+            <button class="collapse-btn" (click)="service.toggleCollapse(node.id); $event.stopPropagation()">
               {{ node.collapsed ? '+' : '−' }}
+              @if (node.collapsed) {
+                <span class="badge">{{ service.childrenOf(node.id).length }}</span>
+              }
             </button>
           }
-          <span class="progress" [style.width.%]="node.progress"></span>
+          <span class="resize-handle" (pointerdown)="service.startNodeResize($event, node.id)"></span>
         </article>
       }
     </div>
   </section>
 
-  <aside class="right-panel">
-    <div class="panel-heading">
-      <span>节点属性</span>
-      <strong>{{ stats().visible }}/{{ stats().total }}</strong>
+  <!-- ─── 浮动工具栏 ─── -->
+  <header class="toolbar">
+    <div class="toolbar-left">
+      <div class="logo">M</div>
+      <input
+        class="title-input"
+        [ngModel]="service.doc().title"
+        (ngModelChange)="service.updateTitle($event)"
+        aria-label="标题"
+      />
     </div>
 
-    <section class="property-group">
-      <label>
-        <span>主题</span>
-        <input
-          [ngModel]="selectedNode().text"
-          (ngModelChange)="updateSelected({ text: $event })"
-          maxlength="40"
-        />
-      </label>
+    <div class="toolbar-center">
+      <button class="tb-btn" title="撤销" (click)="service.undo()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M3 10h13a4 4 0 0 1 0 8H7"/><path d="M3 10l4-4m-4 4l4 4"/></svg>
+      </button>
+      <button class="tb-btn" title="重做" (click)="service.redo()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 10H8a4 4 0 0 0 0 8h10"/><path d="M21 10l-4-4m4 4l-4 4"/></svg>
+      </button>
+      <span class="tb-sep"></span>
+      <button class="tb-btn" title="添加子主题 (Tab)" (click)="service.addChild()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14m-7-7h14"/></svg>
+      </button>
+      <button class="tb-btn" title="添加同级 (Enter)" (click)="service.addSibling()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14m-7-7v14"/></svg>
+      </button>
+      <button class="tb-btn danger" title="删除 (Delete)" (click)="service.deleteSelected()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2m-7 5v6m4-6v6M5 6l1 14h12l1-14"/></svg>
+      </button>
+      <span class="tb-sep"></span>
+      <button class="tb-btn" title="缩小" (click)="service.zoomCanvas(-0.08)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4m-9-3h6"/></svg>
+      </button>
+      <span class="zoom-label">{{ (service.zoom() * 100).toFixed(0) }}%</span>
+      <button class="tb-btn" title="放大" (click)="service.zoomCanvas(0.08)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4m-3-3h6m-3-3v6"/></svg>
+      </button>
+      <button class="tb-btn" title="适应视图" (click)="fitView()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+      </button>
+      <button class="tb-btn" title="自动布局" [class.busy]="service.layoutBusy()" (click)="service.autoLayout()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      </button>
+    </div>
 
-      <label>
-        <span>备注</span>
-        <textarea
-          rows="4"
-          [ngModel]="selectedNode().note"
-          (ngModelChange)="updateSelected({ note: $event })"
-        ></textarea>
-      </label>
-    </section>
-
-    <section class="property-group">
-      <span class="field-title">颜色</span>
-      <div class="swatches">
-        @for (color of colors; track color) {
-          <button
-            [class.active]="selectedNode().color === color"
-            [style.background]="color"
-            [title]="color"
-            (click)="updateSelected({ color })"
-          ></button>
+    <div class="toolbar-right">
+      <!-- 布局选择 -->
+      <div class="dd-wrap">
+        <button class="tb-btn" title="布局" (click)="toggleDropdown('layout'); $event.stopPropagation()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m-7-7H2m20 0h-3m-2.5-5.5L17 6m-10 12l-1.5 1.5M17 18l1.5 1.5M6 6l1.5 1.5"/></svg>
+        </button>
+        @if (activeDropdown === 'layout') {
+          <div class="dd-menu">
+            @for (t of service.layoutTemplates; track t.mode) {
+              <button class="dd-item" [class.active]="service.doc().layout === t.mode"
+                (click)="service.setLayout(t.mode); activeDropdown = null">
+                <span class="dd-name">{{ t.name }}</span>
+                <span class="dd-desc">{{ t.description }}</span>
+              </button>
+            }
+          </div>
         }
       </div>
-
-      <span class="field-title">标记</span>
-      <div class="segments">
-        @for (icon of icons; track icon) {
-          <button
-            [class.active]="selectedNode().icon === icon"
-            [title]="icon"
-            (click)="updateSelected({ icon })"
-          >
-            {{ icon === 'none' ? '无' : iconLabel(icon) }}
-          </button>
+      <!-- 主题选择 -->
+      <div class="dd-wrap">
+        <button class="tb-btn" title="主题" (click)="toggleDropdown('theme'); $event.stopPropagation()">
+          <span class="theme-dot" [style.background]="service.themeColor()"></span>
+        </button>
+        @if (activeDropdown === 'theme') {
+          <div class="dd-menu">
+            @for (t of service.themeTemplates; track t.theme) {
+              <button class="dd-item" [class.active]="service.doc().theme === t.theme"
+                (click)="service.setTheme(t.theme); activeDropdown = null">
+                <span class="dd-colors">
+                  @for (c of t.colors; track c) { <i [style.background]="c"></i> }
+                </span>
+                <span class="dd-name">{{ t.name }}</span>
+              </button>
+            }
+          </div>
         }
       </div>
-
-      <label>
-        <span>进度 {{ selectedNode().progress }}%</span>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          step="5"
-          [ngModel]="selectedNode().progress"
-          (ngModelChange)="updateSelected({ progress: +$event })"
-        />
-      </label>
-    </section>
-
-    <section class="property-group global-group">
-      <div class="group-title">
-        <span>导图模板</span>
-        <small>影响全局布局</small>
-      </div>
-
-      <div class="template-list">
-        @for (template of layoutTemplates; track template.mode) {
-          <button
-            class="layout-template"
-            [class.active]="doc().layout === template.mode"
-            (click)="setLayout(template.mode)"
-          >
-            <span class="layout-preview" [attr.data-layout]="template.mode">
-              <i></i>
-              <i></i>
-              <i></i>
-              <i></i>
-              <i></i>
-            </span>
-            <span>
-              <strong>{{ template.name }}</strong>
-              <small>{{ template.description }}</small>
-            </span>
-          </button>
+      <!-- 线条选择 -->
+      <div class="dd-wrap">
+        <button class="tb-btn" title="线条" (click)="toggleDropdown('lineStyle'); $event.stopPropagation()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M3 17c4-8 8 4 12-4s4-4 6-4"/></svg>
+        </button>
+        @if (activeDropdown === 'lineStyle') {
+          <div class="dd-menu">
+            @for (l of service.lineStyles; track l.type) {
+              <button class="dd-item" [class.active]="service.doc().lineStyle === l.type"
+                (click)="service.setLineStyle($any(l.type)); activeDropdown = null">
+                <span class="dd-name">{{ l.name }}</span>
+              </button>
+            }
+          </div>
         }
       </div>
-    </section>
-
-    <section class="property-group global-group">
-      <div class="group-title">
-        <span>主题模板</span>
-        <small>影响全局外观</small>
-      </div>
-
-      <div class="theme-grid">
-        @for (template of themeTemplates; track template.theme) {
-          <button
-            class="theme-template"
-            [class.active]="doc().theme === template.theme"
-            (click)="setTheme(template.theme)"
-          >
-            <span class="theme-preview">
-              @for (color of template.colors; track color) {
-                <i [style.background]="color"></i>
-              }
-            </span>
-            <strong>{{ template.name }}</strong>
-            <small>{{ template.description }}</small>
-          </button>
+      <span class="tb-sep"></span>
+      <!-- 导出 -->
+      <div class="dd-wrap">
+        <button class="tb-btn" title="导出" (click)="toggleDropdown('export'); $event.stopPropagation()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+        </button>
+        @if (activeDropdown === 'export') {
+          <div class="dd-menu">
+            <button class="dd-item" (click)="service.exportPng(); activeDropdown = null"><span class="dd-name">PNG 图片</span></button>
+            <button class="dd-item" (click)="service.exportSvg(); activeDropdown = null"><span class="dd-name">SVG 矢量</span></button>
+            <button class="dd-item" (click)="service.exportJson(); activeDropdown = null"><span class="dd-name">JSON 数据</span></button>
+            <button class="dd-item" (click)="service.exportMarkdown(); activeDropdown = null"><span class="dd-name">Markdown</span></button>
+            <span class="dd-sep"></span>
+            <label class="dd-item dd-import">
+              <span class="dd-name">导入 JSON</span>
+              <input type="file" accept=".json" (change)="service.importJson($event)" />
+            </label>
+            <button class="dd-item" (click)="service.resetDemo(); activeDropdown = null"><span class="dd-name">恢复示例</span></button>
+          </div>
         }
       </div>
-    </section>
+    </div>
+  </header>
 
-    <section class="status-card">
-      <div>
-        <strong>{{ stats().completed }}</strong>
-        <span>已完成</span>
-      </div>
-      <div>
-        <strong>{{ matchedIds().size }}</strong>
-        <span>搜索命中</span>
-      </div>
-    </section>
-
-    @if (importError()) {
-      <p class="error">{{ importError() }}</p>
-    }
-  </aside>
-
+  <!-- ─── 底部状态栏 ─── -->
   <footer class="statusbar">
+    <span>{{ service.stats().visible }} 个节点</span>
+    <span class="tb-sep"></span>
     <span>Tab 子主题</span>
     <span>Enter 同级</span>
     <span>Delete 删除</span>
-    <span>⌘/Ctrl + Z 撤销</span>
-    <span>本地自动保存</span>
+    <span>双击编辑</span>
+    <span>滚轮平移</span>
+    <span>Ctrl+滚轮缩放</span>
+    <span>右键菜单</span>
   </footer>
+
+  <!-- ─── 右键菜单 ─── -->
+  @if (service.contextMenu(); as menu) {
+    <div class="ctx-menu" [style.left.px]="menu.x" [style.top.px]="menu.y" (click)="$event.stopPropagation()">
+      <button (click)="service.addChild(); service.hideContextMenu()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14m-7-7h14"/></svg>
+        添加子主题
+      </button>
+      <button (click)="service.addSibling(); service.hideContextMenu()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/></svg>
+        添加同级
+      </button>
+      <button (click)="service.startEdit(menu.nodeId); service.hideContextMenu()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 3l4 4L7 21H3v-4L17 3z"/></svg>
+        编辑文本
+      </button>
+      <button (click)="service.toggleCollapse(menu.nodeId); service.hideContextMenu()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/></svg>
+        折叠/展开
+      </button>
+      <span class="ctx-sep"></span>
+      <button class="danger" (click)="service.deleteSelected(); service.hideContextMenu()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 6h18M8 6V4h8v2"/></svg>
+        删除节点
+      </button>
+    </div>
+  }
+
+  <!-- ─── 节点属性面板（浮动） ─── -->
+  @if (showProps && service.selectedNode(); as node) {
+    <aside class="props-panel">
+      <div class="props-header">
+        <span>节点属性</span>
+        <button class="props-close" (click)="showProps = false">×</button>
+      </div>
+      <label class="props-field">
+        <span>文本</span>
+        <input [ngModel]="node.text" (ngModelChange)="service.updateSelected({ text: $event })" maxlength="40" />
+      </label>
+      <label class="props-field">
+        <span>备注</span>
+        <textarea rows="3" [ngModel]="node.note" (ngModelChange)="service.updateSelected({ note: $event })"></textarea>
+      </label>
+      <div class="props-field">
+        <span>颜色</span>
+        <div class="color-row">
+          @for (c of service.branchColors; track c) {
+            <button class="color-dot" [class.active]="node.color === c" [style.background]="c"
+              (click)="service.updateSelected({ color: c })"></button>
+          }
+        </div>
+      </div>
+      <div class="props-field">
+        <span>图标</span>
+        <div class="icon-row">
+          @for (icon of service.icons; track icon) {
+            <button class="icon-btn" [class.active]="node.icon === icon"
+              (click)="service.updateSelected({ icon })">
+              {{ icon === 'none' ? '无' : service.iconLabel(icon) }}
+            </button>
+          }
+        </div>
+      </div>
+    </aside>
+  }
+
+  <!-- 属性面板触发按钮 -->
+  @if (!showProps) {
+    <button class="props-toggle" title="节点属性" (click)="showProps = true">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+    </button>
+  }
+
+  @if (service.importError()) {
+    <div class="error-toast">{{ service.importError() }}</div>
+  }
 </main>
